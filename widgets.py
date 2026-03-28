@@ -27,7 +27,7 @@ def markdown_to_pango(text):
     return text
 
 class ChecklistWidget(Gtk.Box):
-    """Widget for managing sub-tasks"""
+    """Widget for managing sub-requirements"""
     def __init__(self, task, on_change):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.task = task
@@ -59,7 +59,7 @@ class ChecklistWidget(Gtk.Box):
         
         # Add new item entry
         add_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        self.new_item_entry = Gtk.Entry(placeholder_text="Add sub-task...")
+        self.new_item_entry = Gtk.Entry(placeholder_text="Add sub-requirement...")
         self.new_item_entry.set_hexpand(True)
         self.new_item_entry.connect("activate", self.on_add_item)
         
@@ -88,7 +88,7 @@ class ChecklistWidget(Gtk.Box):
         self.on_change()
 
 class HistoryWidget(Gtk.Box):
-    """Widget for displaying task history/audit log"""
+    """Widget for displaying requirement history/audit log"""
     def __init__(self, history):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         for entry in history:
@@ -174,11 +174,12 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
     def create_widgets(self):
         # Header: Title and Status
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        title_entry = Adw.EntryRow(title="Title", text=self.task.title)
+        title_entry = Adw.EntryRow(title="Requirement Title", text=self.task.title)
         title_entry.connect("changed", self.on_field_changed, "title")
         header.append(title_entry)
         
         delete_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        delete_btn.set_tooltip_text("Delete Requirement")
         delete_btn.get_style_context().add_class("destructive-action")
         delete_btn.connect("clicked", self.on_delete_clicked)
         header.append(delete_btn)
@@ -186,9 +187,9 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         self.content.append(header)
 
         # Details combo rows
-        details_list = Adw.PreferencesGroup()
+        details_list = Adw.PreferencesGroup(title="Classification")
         
-        self.status_row = Adw.ComboRow(title="Status")
+        self.status_row = Adw.ComboRow(title="Development Status")
         status_model = Gtk.StringList.new(["Pending", "In Progress", "Completed", "Blocked"])
         self.status_row.set_model(status_model)
         status_map = {"pending": 0, "in_progress": 1, "completed": 2, "blocked": 3}
@@ -196,14 +197,14 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         self.status_row.connect("notify::selected", self.on_status_changed)
         details_list.add(self.status_row)
         
-        self.priority_row = Adw.ComboRow(title="Priority")
+        self.priority_row = Adw.ComboRow(title="Business Priority")
         priority_model = Gtk.StringList.new(["Low", "Medium", "High", "Critical"])
         self.priority_row.set_model(priority_model)
         self.priority_row.set_selected(self.task.priority.value - 1)
         self.priority_row.connect("notify::selected", self.on_priority_changed)
         details_list.add(self.priority_row)
         
-        self.category_row = Adw.EntryRow(title="PRD Section/Category", text=self.task.category)
+        self.category_row = Adw.EntryRow(title="PRD Section", text=self.task.category)
         self.category_row.connect("changed", self.on_field_changed, "category")
         details_list.add(self.category_row)
         
@@ -212,16 +213,17 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         # Description with Markdown Toggle
         desc_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         desc_label_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        desc_label_box.append(Gtk.Label(label="Description (Markdown supported):", xalign=0, hexpand=True))
+        desc_label_box.append(Gtk.Label(label="Technical Specification (Markdown):", xalign=0, hexpand=True))
         
         self.preview_btn = Gtk.ToggleButton(label="Preview")
+        self.preview_btn.set_tooltip_text("Toggle formatted PRD preview")
         self.preview_btn.connect("toggled", self.on_preview_toggled)
         desc_label_box.append(self.preview_btn)
         
         self.desc_stack = Gtk.Stack()
         self.desc_buffer = Gtk.TextBuffer(text=self.task.description)
         self.desc_view = Gtk.TextView(buffer=self.desc_buffer, wrap_mode=Gtk.WrapMode.WORD)
-        self.desc_view.set_size_request(-1, 150)
+        self.desc_view.set_size_request(-1, 200)
         
         self.desc_preview = Gtk.Label(xalign=0, yalign=0, wrap=True)
         self.desc_preview.set_use_markup(True)
@@ -234,11 +236,11 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         self.content.append(desc_box)
         
         # Checklist
-        self.content.append(Gtk.Label(label="Sub-tasks Checklist:", xalign=0))
+        self.content.append(Gtk.Label(label="Functional Checklist / Sub-requirements:", xalign=0))
         self.content.append(ChecklistWidget(self.task, self.save_task))
         
         # History
-        history_expander = Gtk.Expander(label="Audit Log / History")
+        history_expander = Gtk.Expander(label="Audit Log / Version History")
         history_list = HistoryWidget(self.db.get_task_history(self.task.id))
         history_expander.set_child(history_list)
         self.content.append(history_expander)
@@ -288,16 +290,16 @@ class StatsWidget(Gtk.Box):
         while child := self.get_first_child(): self.remove(child)
         stats = self.db.get_statistics()
         
-        group = Adw.PreferencesGroup(title="Application Statistics")
-        group.add(Adw.ActionRow(title="Total Tasks", subtitle=str(stats['total'])))
+        group = Adw.PreferencesGroup(title="PRD Progress Analytics")
+        group.add(Adw.ActionRow(title="Total Requirements", subtitle=str(stats['total'])))
         group.add(Adw.ActionRow(title="Completed", subtitle=str(stats['status_completed'])))
-        group.add(Adw.ActionRow(title="Completion Rate", subtitle=f"{stats['completion_rate']:.1f}%"))
-        group.add(Adw.ActionRow(title="Overdue", subtitle=str(stats['overdue'])))
+        group.add(Adw.ActionRow(title="Requirement Completion Rate", subtitle=f"{stats['completion_rate']:.1f}%"))
+        group.add(Adw.ActionRow(title="Overdue Schedule Items", subtitle=str(stats['overdue'])))
         
         self.append(group)
 
 class TaskCard(Gtk.Box):
-    """Compact card for Roadmap/Planning"""
+    """Compact card for Timeline/Sections"""
     def __init__(self, task: Task):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.set_margin_top(10)
@@ -317,7 +319,7 @@ class TaskCard(Gtk.Box):
         self.append(info)
 
 class RoadmapView(Gtk.ScrolledWindow):
-    """Roadmap grouped by Month"""
+    """Timeline grouped by Month"""
     def __init__(self, db):
         super().__init__()
         self.db = db
@@ -333,10 +335,13 @@ class RoadmapView(Gtk.ScrolledWindow):
         while child := self.content.get_first_child(): self.content.remove(child)
         tasks = self.db.get_all_tasks()
         
-        # Simple grouping by month/year
+        if not tasks:
+            self.content.append(Adw.StatusPage(title="Timeline is Empty", description="Requirements with due dates will appear here.", icon_name="calendar-month-symbolic"))
+            return
+
         groups = {}
         for t in tasks:
-            key = t.due_date.strftime("%B %Y") if t.due_date else "Backlog"
+            key = t.due_date.strftime("%B %Y") if t.due_date else "Backlog / Unscheduled"
             if key not in groups: groups[key] = []
             groups[key].append(t)
             
@@ -363,9 +368,13 @@ class PlanningView(Gtk.ScrolledWindow):
         while child := self.content.get_first_child(): self.content.remove(child)
         tasks = self.db.get_all_tasks()
         
+        if not tasks:
+            self.content.append(Adw.StatusPage(title="No Sections Defined", description="Group your requirements into PRD sections to see them here.", icon_name="view-grid-symbolic"))
+            return
+
         groups = {}
         for t in tasks:
-            key = t.category if t.category else "Uncategorized"
+            key = t.category if t.category else "Uncategorized Requirements"
             if key not in groups: groups[key] = []
             groups[key].append(t)
             
@@ -376,32 +385,27 @@ class PlanningView(Gtk.ScrolledWindow):
             self.content.append(section)
 
 class AddTaskWindow(Adw.Window):
-    """Proper dialog for adding tasks"""
+    """Proper dialog for adding requirements"""
     def __init__(self, parent, db, on_save):
-        super().__init__(title="Add New Requirement", transient_for=parent, modal=True)
+        super().__init__(title="Draft New Requirement", transient_for=parent, modal=True)
         self.db = db
         self.on_save = on_save
         self.set_default_size(500, 650)
         
-        # Main layout using ToolbarView for a proper header
         toolbar_view = Adw.ToolbarView()
         self.set_content(toolbar_view)
         
-        # Header Bar
         header = Adw.HeaderBar()
         toolbar_view.add_top_bar(header)
         
-        # Cancel Button
         cancel_btn = Gtk.Button(label="Cancel")
         cancel_btn.connect("clicked", lambda _: self.close())
         header.pack_start(cancel_btn)
         
-        # Save Button in header
-        save_btn = Gtk.Button(label="Add", css_classes=["suggested-action"])
+        save_btn = Gtk.Button(label="Add to PRD", css_classes=["suggested-action"])
         save_btn.connect("clicked", self.save)
         header.pack_end(save_btn)
         
-        # Scrollable content
         scrolled = Gtk.ScrolledWindow()
         toolbar_view.set_content(scrolled)
         
@@ -412,30 +416,25 @@ class AddTaskWindow(Adw.Window):
         content.set_margin_end(20)
         scrolled.set_child(content)
         
-        # Form Groups
-        group = Adw.PreferencesGroup()
+        group = Adw.PreferencesGroup(title="Requirement Details")
         content.append(group)
         
-        self.title_entry = Adw.EntryRow(title="Title")
+        self.title_entry = Adw.EntryRow(title="Requirement Title")
         group.add(self.title_entry)
         
-        self.category_entry = Adw.EntryRow(title="Category/Section")
+        self.category_entry = Adw.EntryRow(title="PRD Section (e.g., UI, Backend)")
         group.add(self.category_entry)
         
-        self.priority_row = Adw.ComboRow(title="Priority")
+        self.priority_row = Adw.ComboRow(title="Priority Level")
         self.priority_row.set_model(Gtk.StringList.new(["Low", "Medium", "High", "Critical"]))
         self.priority_row.set_selected(1)
         group.add(self.priority_row)
         
-        # Description
-        desc_label = Gtk.Label(label="Description:", xalign=0)
-        content.append(desc_label)
-        
+        content.append(Gtk.Label(label="High-level Description:", xalign=0))
         self.desc_buffer = Gtk.TextBuffer()
         desc_view = Gtk.TextView(buffer=self.desc_buffer, wrap_mode=Gtk.WrapMode.WORD)
         desc_view.set_size_request(-1, 200)
         
-        # Container for text view to give it a border
         text_frame = Gtk.Frame()
         text_frame.set_child(desc_view)
         content.append(text_frame)
@@ -454,3 +453,25 @@ class AddTaskWindow(Adw.Window):
         self.db.add_task(task)
         self.on_save()
         self.close()
+
+class OnboardingWidget(Adw.StatusPage):
+    """Initial onboarding for new users"""
+    def __init__(self, on_add_clicked):
+        super().__init__(
+            icon_name="document-edit-symbolic",
+            title="Welcome to PRD Manager",
+            description="A professional tool for engineering your Product Requirements.\n\n1. Define your requirements in the List view.\n2. Organize them into PRD Sections.\n3. Schedule them on the Timeline.\n4. Export a structured document for your team."
+        )
+        btn = Gtk.Button(label="Draft Your First Requirement", css_classes=["suggested-action"])
+        btn.connect("clicked", lambda _: on_add_clicked(None))
+        btn.set_halign(Gtk.Align.CENTER)
+        self.set_child(btn)
+
+class EmptySelectionWidget(Adw.StatusPage):
+    """Shown when no requirement is selected"""
+    def __init__(self):
+        super().__init__(
+            icon_name="cursor-arrow-click-symbolic",
+            title="No Requirement Selected",
+            description="Select a requirement from the sidebar to edit details, manage sub-tasks, or view history."
+        )
