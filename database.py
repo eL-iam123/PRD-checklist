@@ -243,5 +243,11 @@ class Database:
         self.cursor.execute("SELECT * FROM categories ORDER BY name")
         return [dict(row) for row in self.cursor.fetchall()]
     
+    def delete_task(self, task_id: int) -> bool:
+        """Delete a task"""
+        self.cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self.conn.commit()
+        return self.cursor.rowcount > 0
+
     def close(self):
         if self.conn: self.conn.close()

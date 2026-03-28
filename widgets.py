@@ -9,11 +9,13 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Adw, Pango
 from datetime import datetime
 import uuid
+import json
 from models import Task, Status, Priority, SubTask
 
 def markdown_to_pango(text):
     """Simple markdown to Pango markup converter"""
     import re
+    if not text: return ""
     # Bold
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     # Italic
@@ -175,12 +177,42 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         title_entry = Adw.EntryRow(title="Title", text=self.task.title)
         title_entry.connect("changed", self.on_field_changed, "title")
         header.append(title_entry)
+        
+        delete_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        delete_btn.get_style_context().add_class("destructive-action")
+        delete_btn.connect("clicked", self.on_delete_clicked)
+        header.append(delete_btn)
+        
         self.content.append(header)
+
+        # Details combo rows
+        details_list = Adw.PreferencesGroup()
+        
+        self.status_row = Adw.ComboRow(title="Status")
+        status_model = Gtk.StringList.new(["Pending", "In Progress", "Completed", "Blocked"])
+        self.status_row.set_model(status_model)
+        status_map = {"pending": 0, "in_progress": 1, "completed": 2, "blocked": 3}
+        self.status_row.set_selected(status_map.get(self.task.status.value, 0))
+        self.status_row.connect("notify::selected", self.on_status_changed)
+        details_list.add(self.status_row)
+        
+        self.priority_row = Adw.ComboRow(title="Priority")
+        priority_model = Gtk.StringList.new(["Low", "Medium", "High", "Critical"])
+        self.priority_row.set_model(priority_model)
+        self.priority_row.set_selected(self.task.priority.value - 1)
+        self.priority_row.connect("notify::selected", self.on_priority_changed)
+        details_list.add(self.priority_row)
+        
+        self.category_row = Adw.EntryRow(title="PRD Section/Category", text=self.task.category)
+        self.category_row.connect("changed", self.on_field_changed, "category")
+        details_list.add(self.category_row)
+        
+        self.content.append(details_list)
 
         # Description with Markdown Toggle
         desc_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         desc_label_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        desc_label_box.append(Gtk.Label(label="Description (Markdown supported):", xalign=0))
+        desc_label_box.append(Gtk.Label(label="Description (Markdown supported):", xalign=0, hexpand=True))
         
         self.preview_btn = Gtk.ToggleButton(label="Preview")
         self.preview_btn.connect("toggled", self.on_preview_toggled)
@@ -223,11 +255,22 @@ class TaskDetailWidget(Gtk.ScrolledWindow):
         setattr(self.task, field_name, entry.get_text())
         self.save_task()
 
+    def on_status_changed(self, combo, _):
+        status_map = {0: "pending", 1: "in_progress", 2: "completed", 3: "blocked"}
+        self.task.status = Status.from_string(status_map[combo.get_selected()])
+        self.save_task()
+
+    def on_priority_changed(self, combo, _):
+        self.task.priority = Priority(combo.get_selected() + 1)
+        self.save_task()
+
+    def on_delete_clicked(self, btn):
+        self.db.delete_task(self.task.id)
+        if self.on_update: self.on_update()
+
     def save_task(self):
-        # Update description from buffer before saving
         if self.desc_stack.get_visible_child_name() == "edit":
             self.task.description = self.desc_buffer.get_text(self.desc_buffer.get_start_iter(), self.desc_buffer.get_end_iter(), False)
-        
         self.db.update_task(self.task)
         if self.on_update: self.on_update()
 
@@ -244,4 +287,170 @@ class StatsWidget(Gtk.Box):
     def refresh(self):
         while child := self.get_first_child(): self.remove(child)
         stats = self.db.get_statistics()
-        self.append(Gtk.Label(label=f"Completion Rate: {stats['completion_rate']:.1f}%"))
+        
+        group = Adw.PreferencesGroup(title="Application Statistics")
+        group.add(Adw.ActionRow(title="Total Tasks", subtitle=str(stats['total'])))
+        group.add(Adw.ActionRow(title="Completed", subtitle=str(stats['status_completed'])))
+        group.add(Adw.ActionRow(title="Completion Rate", subtitle=f"{stats['completion_rate']:.1f}%"))
+        group.add(Adw.ActionRow(title="Overdue", subtitle=str(stats['overdue'])))
+        
+        self.append(group)
+
+class TaskCard(Gtk.Box):
+    """Compact card for Roadmap/Planning"""
+    def __init__(self, task: Task):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        self.set_margin_top(10)
+        self.set_margin_bottom(10)
+        self.set_margin_start(10)
+        self.set_margin_end(10)
+        
+        title = Gtk.Label(xalign=0)
+        title.set_markup(f"<b>{GLib.markup_escape_text(task.title)}</b>")
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        self.append(title)
+        
+        info = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        info.append(Gtk.Label(label=task.priority.get_emoji()))
+        if task.category:
+            info.append(Gtk.Label(label=f"[{task.category}]"))
+        self.append(info)
+
+class RoadmapView(Gtk.ScrolledWindow):
+    """Roadmap grouped by Month"""
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        self.content.set_margin_top(20)
+        self.content.set_margin_bottom(20)
+        self.content.set_margin_start(20)
+        self.content.set_margin_end(20)
+        self.set_child(self.content)
+        self.refresh()
+
+    def refresh(self):
+        while child := self.content.get_first_child(): self.content.remove(child)
+        tasks = self.db.get_all_tasks()
+        
+        # Simple grouping by month/year
+        groups = {}
+        for t in tasks:
+            key = t.due_date.strftime("%B %Y") if t.due_date else "Backlog"
+            if key not in groups: groups[key] = []
+            groups[key].append(t)
+            
+        for key, group_tasks in groups.items():
+            section = Adw.PreferencesGroup(title=key)
+            for t in group_tasks:
+                section.add(TaskCard(t))
+            self.content.append(section)
+
+class PlanningView(Gtk.ScrolledWindow):
+    """Planning grouped by PRD Section"""
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        self.content.set_margin_top(20)
+        self.content.set_margin_bottom(20)
+        self.content.set_margin_start(20)
+        self.content.set_margin_end(20)
+        self.set_child(self.content)
+        self.refresh()
+
+    def refresh(self):
+        while child := self.content.get_first_child(): self.content.remove(child)
+        tasks = self.db.get_all_tasks()
+        
+        groups = {}
+        for t in tasks:
+            key = t.category if t.category else "Uncategorized"
+            if key not in groups: groups[key] = []
+            groups[key].append(t)
+            
+        for key, group_tasks in groups.items():
+            section = Adw.PreferencesGroup(title=key)
+            for t in group_tasks:
+                section.add(TaskCard(t))
+            self.content.append(section)
+
+class AddTaskWindow(Adw.Window):
+    """Proper dialog for adding tasks"""
+    def __init__(self, parent, db, on_save):
+        super().__init__(title="Add New Requirement", transient_for=parent, modal=True)
+        self.db = db
+        self.on_save = on_save
+        self.set_default_size(500, 650)
+        
+        # Main layout using ToolbarView for a proper header
+        toolbar_view = Adw.ToolbarView()
+        self.set_content(toolbar_view)
+        
+        # Header Bar
+        header = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header)
+        
+        # Cancel Button
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda _: self.close())
+        header.pack_start(cancel_btn)
+        
+        # Save Button in header
+        save_btn = Gtk.Button(label="Add", css_classes=["suggested-action"])
+        save_btn.connect("clicked", self.save)
+        header.pack_end(save_btn)
+        
+        # Scrollable content
+        scrolled = Gtk.ScrolledWindow()
+        toolbar_view.set_content(scrolled)
+        
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        content.set_margin_top(20)
+        content.set_margin_bottom(20)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
+        scrolled.set_child(content)
+        
+        # Form Groups
+        group = Adw.PreferencesGroup()
+        content.append(group)
+        
+        self.title_entry = Adw.EntryRow(title="Title")
+        group.add(self.title_entry)
+        
+        self.category_entry = Adw.EntryRow(title="Category/Section")
+        group.add(self.category_entry)
+        
+        self.priority_row = Adw.ComboRow(title="Priority")
+        self.priority_row.set_model(Gtk.StringList.new(["Low", "Medium", "High", "Critical"]))
+        self.priority_row.set_selected(1)
+        group.add(self.priority_row)
+        
+        # Description
+        desc_label = Gtk.Label(label="Description:", xalign=0)
+        content.append(desc_label)
+        
+        self.desc_buffer = Gtk.TextBuffer()
+        desc_view = Gtk.TextView(buffer=self.desc_buffer, wrap_mode=Gtk.WrapMode.WORD)
+        desc_view.set_size_request(-1, 200)
+        
+        # Container for text view to give it a border
+        text_frame = Gtk.Frame()
+        text_frame.set_child(desc_view)
+        content.append(text_frame)
+
+    def save(self, _):
+        title = self.title_entry.get_text()
+        if not title:
+            return
+        
+        task = Task(
+            title=title,
+            category=self.category_entry.get_text(),
+            priority=Priority(self.priority_row.get_selected() + 1),
+            description=self.desc_buffer.get_text(self.desc_buffer.get_start_iter(), self.desc_buffer.get_end_iter(), False)
+        )
+        self.db.add_task(task)
+        self.on_save()
+        self.close()
